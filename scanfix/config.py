@@ -49,8 +49,17 @@ class MemoryConfig:
 
 
 @dataclass
+class ReviewerConfig:
+    enabled: bool = True
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+
+
+@dataclass
 class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
+    reviewer: ReviewerConfig = field(default_factory=ReviewerConfig)
     scan: ScanConfig = field(default_factory=ScanConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
@@ -100,6 +109,18 @@ def _merge_output(cfg: OutputConfig, data: dict) -> None:
         cfg.github_repo = out["github_repo"]
 
 
+def _merge_reviewer(cfg: ReviewerConfig, data: dict) -> None:
+    rev = data.get("reviewer", {})
+    if "enabled" in rev:
+        cfg.enabled = rev["enabled"]
+    if "model" in rev:
+        cfg.model = rev["model"]
+    if "base_url" in rev:
+        cfg.base_url = rev["base_url"]
+    if "api_key" in rev:
+        cfg.api_key = rev["api_key"]
+
+
 def _merge_memory(cfg: MemoryConfig, data: dict) -> None:
     mem = data.get("memory", {})
     if "db_path" in mem:
@@ -116,11 +137,16 @@ def load_config(
     github_issues: Optional[bool] = None,
     github_prs: Optional[bool] = None,
     github_repo: Optional[str] = None,
+    reviewer_model: Optional[str] = None,
+    reviewer_base_url: Optional[str] = None,
+    reviewer_api_key: Optional[str] = None,
+    no_review: bool = False,
 ) -> Config:
     cfg = Config()
 
     global_toml = _load_toml(Path.home() / ".scanfix.toml")
     _merge_llm(cfg.llm, global_toml)
+    _merge_reviewer(cfg.reviewer, global_toml)
     _merge_scan(cfg.scan, global_toml)
     _merge_output(cfg.output, global_toml)
     _merge_memory(cfg.memory, global_toml)
@@ -128,6 +154,7 @@ def load_config(
     if repo_path:
         repo_toml = _load_toml(Path(repo_path) / "scanfix.toml")
         _merge_llm(cfg.llm, repo_toml)
+        _merge_reviewer(cfg.reviewer, repo_toml)
         _merge_scan(cfg.scan, repo_toml)
         _merge_output(cfg.output, repo_toml)
         _merge_memory(cfg.memory, repo_toml)
@@ -158,6 +185,14 @@ def load_config(
         cfg.output.create_github_prs = github_prs
     if github_repo:
         cfg.output.github_repo = github_repo
+    if reviewer_model:
+        cfg.reviewer.model = reviewer_model
+    if reviewer_base_url:
+        cfg.reviewer.base_url = reviewer_base_url
+    if reviewer_api_key:
+        cfg.reviewer.api_key = reviewer_api_key
+    if no_review:
+        cfg.reviewer.enabled = False
 
     return cfg
 
@@ -168,6 +203,12 @@ model = "claude-3-5-sonnet-20241022"
 base_url = "https://api.anthropic.com/v1"
 max_tokens = 4096
 chunk_size = 150
+
+[reviewer]
+enabled = true
+# model defaults to [llm] model if not set
+# model = "gpt-4o-mini"
+# base_url = "https://api.openai.com/v1"
 
 [scan]
 severity_threshold = "high"

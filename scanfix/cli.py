@@ -36,6 +36,10 @@ def cli():
 @click.option("--github-repo", default=None, help="GitHub repo (owner/repo)")
 @click.option("--api-key", envvar="SCANFIX_API_KEY", default=None, help="API key")
 @click.option("--base-url", envvar="SCANFIX_BASE_URL", default=None, help="LLM API base URL")
+@click.option("--reviewer-model", default=None, help="Model for 2nd-pass review (defaults to scanner model)")
+@click.option("--reviewer-base-url", default=None, help="Base URL for reviewer model")
+@click.option("--reviewer-api-key", envvar="SCANFIX_REVIEWER_API_KEY", default=None, help="API key for reviewer model")
+@click.option("--no-review", is_flag=True, default=False, help="Skip 2nd-pass review filter")
 def scan(
     repo_path,
     model,
@@ -48,6 +52,10 @@ def scan(
     github_repo,
     api_key,
     base_url,
+    reviewer_model,
+    reviewer_base_url,
+    reviewer_api_key,
+    no_review,
 ):
     """Scan a repository for issues using AI."""
     from scanfix.config import load_config
@@ -65,6 +73,10 @@ def scan(
         github_issues=github_issues if github_issues else None,
         github_prs=github_prs if github_prs else None,
         github_repo=github_repo,
+        reviewer_model=reviewer_model,
+        reviewer_base_url=reviewer_base_url,
+        reviewer_api_key=reviewer_api_key,
+        no_review=no_review,
     )
 
     if not cfg.llm.api_key:
@@ -83,6 +95,24 @@ def scan(
         console=console,
     ) as progress:
         report = analyze_repo(repo_path, cfg, memory_store=memory_store, progress=progress)
+
+    if cfg.reviewer.enabled and report.issues:
+        from scanfix.scanner.reviewer import review_issues
+        from openai import OpenAI
+
+        rev_model = cfg.reviewer.model or cfg.llm.model
+        rev_base_url = cfg.reviewer.base_url or cfg.llm.base_url
+        rev_api_key = cfg.reviewer.api_key or cfg.llm.api_key
+
+        console.print(
+            f"[bold cyan]Reviewing[/bold cyan] {len(report.issues)} issues "
+            f"with model [bold]{rev_model}[/bold]..."
+        )
+        rev_client = OpenAI(api_key=rev_api_key or "sk-no-key", base_url=rev_base_url)
+        before = len(report.issues)
+        report.issues = review_issues(report.issues, rev_client, rev_model, cfg.llm.max_tokens)
+        after = len(report.issues)
+        console.print(f"  [dim]Filtered {before - after} false positives, {after} issues remaining.[/dim]")
 
     for issue in report.issues:
         memory_store.save_issue(issue, repo_path)
