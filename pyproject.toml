@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scanfix"
+version = "0.1.0"
+description = "AI-powered codebase scanner and fixer"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0",
+    "rich>=13.0",
+    "openai>=1.0",
+    "pathspec>=0.11",
+    "pygithub>=2.0",
+    "tomli>=2.0; python_version < '3.11'",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+agent = ["minisweagent>=0.1"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+scanfix = "scanfix.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scanfix"]
