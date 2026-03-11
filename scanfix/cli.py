@@ -37,7 +37,7 @@ def cli():
 @click.option("--api-key", envvar="SCANFIX_API_KEY", default=None, help="API key")
 @click.option("--base-url", envvar="SCANFIX_BASE_URL", default=None, help="LLM API base URL")
 @click.option("--reviewer-model", default=None, help="Model for 2nd-pass review (defaults to scanner model)")
-@click.option("--reviewer-base-url", default=None, help="Base URL for reviewer model")
+@click.option("--reviewer-base-url", envvar="SCANFIX_REVIEWER_BASE_URL", default=None, help="Base URL for reviewer model")
 @click.option("--reviewer-api-key", envvar="SCANFIX_REVIEWER_API_KEY", default=None, help="API key for reviewer model")
 @click.option("--no-review", is_flag=True, default=False, help="Skip 2nd-pass review filter")
 def scan(
