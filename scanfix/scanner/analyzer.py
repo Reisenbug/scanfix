@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from typing import Optional
 
 from openai import OpenAI
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import Progress
 
 from scanfix.config import Config
 from scanfix.models import Issue, IssueReport, IssueType, Severity
 from scanfix.scanner.chunker import FileChunk, chunk_file
 from scanfix.scanner.walker import iter_repo_files
-
-from datetime import datetime
 
 
 SYSTEM_PROMPT = """\
@@ -129,32 +129,49 @@ def analyze_repo(
         base_url=cfg.llm.base_url,
     )
 
-    all_issues: list[Issue] = []
     files = list(iter_repo_files(repo_path, excluded_dirs=cfg.scan.excluded_dirs))
+    chunks = [
+        chunk
+        for file_path in files
+        for chunk in chunk_file(file_path, chunk_size=cfg.llm.chunk_size)
+    ]
 
     task = None
     if progress:
-        task = progress.add_task("Scanning files...", total=len(files))
+        task = progress.add_task("Scanning...", total=len(chunks))
 
-    for file_path in files:
+    all_issues: list[Issue] = []
+    lock = threading.Lock()
+    done = threading.Event()
+
+    def process_chunk(chunk: FileChunk) -> list[Issue]:
+        if done.is_set():
+            return []
+        issues = analyze_chunk(chunk, client, cfg)
         if progress and task is not None:
-            progress.update(task, advance=1, description=f"Scanning {file_path.name}...")
+            progress.update(task, advance=1, description=f"Scanning {chunk.file_path.split('/')[-1]}...")
+        return [
+            issue for issue in issues
+            if not (memory_store and memory_store.is_known_issue(issue, repo_path))
+        ]
 
-        chunks = list(chunk_file(file_path, chunk_size=cfg.llm.chunk_size))
-        for chunk in chunks:
-            issues = analyze_chunk(chunk, client, cfg)
-            for issue in issues:
-                if memory_store and memory_store.is_known_issue(issue, repo_path):
-                    continue
-                all_issues.append(issue)
-                if len(all_issues) >= cfg.scan.max_issues:
-                    break
-            if len(all_issues) >= cfg.scan.max_issues:
-                break
-        if len(all_issues) >= cfg.scan.max_issues:
-            break
+    with ThreadPoolExecutor(max_workers=cfg.llm.max_workers) as executor:
+        futures = {executor.submit(process_chunk, chunk): chunk for chunk in chunks}
+        for future in as_completed(futures):
+            if done.is_set():
+                future.cancel()
+                continue
+            try:
+                issues = future.result()
+            except Exception:
+                continue
+            with lock:
+                if not done.is_set():
+                    all_issues.extend(issues)
+                    if len(all_issues) >= cfg.scan.max_issues:
+                        done.set()
 
-    deduped = deduplicate_issues(all_issues)
+    deduped = deduplicate_issues(all_issues[:cfg.scan.max_issues])
 
     return IssueReport(
         repo_path=repo_path,

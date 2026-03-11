@@ -24,6 +24,7 @@ class LLMConfig:
     api_key: str = ""
     max_tokens: int = 4096
     chunk_size: int = 150
+    max_workers: int = 20
 
 
 @dataclass
@@ -85,6 +86,8 @@ def _merge_llm(cfg: LLMConfig, data: dict) -> None:
         cfg.max_tokens = llm["max_tokens"]
     if "chunk_size" in llm:
         cfg.chunk_size = llm["chunk_size"]
+    if "max_workers" in llm:
+        cfg.max_workers = llm["max_workers"]
 
 
 def _merge_scan(cfg: ScanConfig, data: dict) -> None:
@@ -219,6 +222,7 @@ model = "claude-3-5-sonnet-20241022"
 base_url = "https://api.anthropic.com/v1"
 max_tokens = 4096
 chunk_size = 150
+max_workers = 20
 
 [reviewer]
 enabled = true
