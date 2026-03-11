@@ -167,6 +167,22 @@ def load_config(
     if env_base_url:
         cfg.llm.base_url = env_base_url
 
+    env_model = os.environ.get("SCANFIX_MODEL", "")
+    if env_model:
+        cfg.llm.model = env_model
+
+    env_rev_api_key = os.environ.get("SCANFIX_REVIEWER_API_KEY", "")
+    if env_rev_api_key:
+        cfg.reviewer.api_key = env_rev_api_key
+
+    env_rev_base_url = os.environ.get("SCANFIX_REVIEWER_BASE_URL", "")
+    if env_rev_base_url:
+        cfg.reviewer.base_url = env_rev_base_url
+
+    env_rev_model = os.environ.get("SCANFIX_REVIEWER_MODEL", "")
+    if env_rev_model:
+        cfg.reviewer.model = env_rev_model
+
     cfg.github_token = os.environ.get("GITHUB_TOKEN", "")
 
     if model:
