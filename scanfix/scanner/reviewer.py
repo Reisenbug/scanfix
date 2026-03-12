@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 
 from openai import OpenAI
 
@@ -23,9 +24,26 @@ Reject an issue if it is:
 - About missing documentation, comments, or metadata (e.g. missing license field)
 - About non-code files (e.g. cache files, lock files)
 
-Return ONLY a JSON object with a single key "keep": a list of issue IDs to retain.
-Example: {"keep": ["id1", "id3"]}
+Return ONLY a JSON object with two keys:
+- "keep": list of issue IDs to retain
+- "rejected": list of objects with "id" and "reason" for each rejected issue
+
+Example:
+{
+  "keep": ["id1", "id3"],
+  "rejected": [
+    {"id": "id2", "reason": "False positive: the null check is intentional here"},
+    {"id": "id4", "reason": "Trivial style preference with no functional impact"}
+  ]
+}
 No explanation, no markdown, just the JSON object."""
+
+
+@dataclass
+class ReviewResult:
+    kept: list[Issue]
+    rejected: list[Issue]
+    rejection_reasons: dict[str, str]
 
 
 def _format_issues_for_review(issues: list[Issue]) -> str:
@@ -46,16 +64,22 @@ def _format_issues_for_review(issues: list[Issue]) -> str:
     return "\n\n".join(lines)
 
 
-def _parse_keep_ids(text: str) -> list[str] | None:
+def _parse_response(text: str) -> tuple[list[str] | None, dict[str, str]]:
     text = text.strip()
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
         text = match.group(0)
     try:
         data = json.loads(text)
-        return data.get("keep", [])
+        keep = data.get("keep", [])
+        reasons = {
+            r["id"]: r.get("reason", "")
+            for r in data.get("rejected", [])
+            if isinstance(r, dict) and "id" in r
+        }
+        return keep, reasons
     except (json.JSONDecodeError, AttributeError):
-        return None
+        return None, {}
 
 
 def review_issues(
@@ -63,12 +87,12 @@ def review_issues(
     client: OpenAI,
     model: str,
     max_tokens: int = 4096,
-) -> list[Issue]:
+) -> ReviewResult:
     if not issues:
-        return []
+        return ReviewResult(kept=[], rejected=[], rejection_reasons={})
 
     user_content = (
-        f"Review the following {len(issues)} issues and return the IDs of the ones worth keeping:\n\n"
+        f"Review the following {len(issues)} issues and return keep/rejected with reasons:\n\n"
         + _format_issues_for_review(issues)
     )
 
@@ -82,25 +106,28 @@ def review_issues(
         max_tokens=max_tokens,
         messages=messages,
     )
-    raw = response.choices[0].message.content or '{"keep": []}'
+    raw = response.choices[0].message.content or '{"keep": [], "rejected": []}'
 
-    keep_ids = _parse_keep_ids(raw)
+    keep_ids, reasons = _parse_response(raw)
 
     if keep_ids is None:
         correction_messages = messages + [
             {"role": "assistant", "content": raw},
-            {"role": "user", "content": 'Invalid JSON. Return only {"keep": ["id1", "id2", ...]} with no other text.'},
+            {"role": "user", "content": 'Invalid JSON. Return only {"keep": [...], "rejected": [{"id": ..., "reason": ...}]} with no other text.'},
         ]
         retry = client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
             messages=correction_messages,
         )
-        raw2 = retry.choices[0].message.content or '{"keep": []}'
-        keep_ids = _parse_keep_ids(raw2)
+        raw2 = retry.choices[0].message.content or '{"keep": [], "rejected": []}'
+        keep_ids, reasons = _parse_response(raw2)
 
     if keep_ids is None:
-        return issues
+        return ReviewResult(kept=issues, rejected=[], rejection_reasons={})
 
     keep_set = set(keep_ids)
-    return [i for i in issues if i.id in keep_set]
+    kept = [i for i in issues if i.id in keep_set]
+    rejected = [i for i in issues if i.id not in keep_set]
+
+    return ReviewResult(kept=kept, rejected=rejected, rejection_reasons=reasons)

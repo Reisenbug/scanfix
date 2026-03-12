@@ -109,10 +109,23 @@ def scan(
             f"with model [bold]{rev_model}[/bold]..."
         )
         rev_client = OpenAI(api_key=rev_api_key or "sk-no-key", base_url=rev_base_url)
+        result = review_issues(report.issues, rev_client, rev_model, cfg.llm.max_tokens)
         before = len(report.issues)
-        report.issues = review_issues(report.issues, rev_client, rev_model, cfg.llm.max_tokens)
-        after = len(report.issues)
+        after = len(result.kept)
         console.print(f"  [dim]Filtered {before - after} false positives, {after} issues remaining.[/dim]")
+
+        if result.rejected:
+            from rich.table import Table
+            from rich import box as rich_box
+            t = Table(box=rich_box.SIMPLE, show_header=True, header_style="bold")
+            t.add_column("Rejected Issue", max_width=40)
+            t.add_column("Reason", max_width=60)
+            for issue in result.rejected:
+                reason = result.rejection_reasons.get(issue.id, "—")
+                t.add_row(f"[dim]{issue.title}[/dim]", f"[dim]{reason}[/dim]")
+            console.print(t)
+
+        report.issues = result.kept
 
     for issue in report.issues:
         memory_store.save_issue(issue, repo_path)
